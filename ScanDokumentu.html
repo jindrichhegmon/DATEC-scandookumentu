@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scan dokumentů — vytěžování informací</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #dfe3e8;
+    --text: #1c2733;
+    --muted: #6b7684;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-soft: #eff4ff;
+    --danger: #dc2626;
+    --ok: #16a34a;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c;
+      --panel: #1b212a;
+      --border: #2c3540;
+      --text: #e6eaef;
+      --muted: #94a0ad;
+      --accent: #4f83f1;
+      --accent-hover: #6d99f4;
+      --accent-soft: #1e2a41;
+      --danger: #f87171;
+      --ok: #4ade80;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  header h1 { font-size: 22px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  header h1 .logo { font-size: 26px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .panel h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; }
+  button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: 12px 22px;
+    font-size: 16px;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  button.danger { color: var(--danger); }
+  button.danger:hover { border-color: var(--danger); }
+  input[type=text], input[type=password], textarea, select {
+    font: inherit;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea { resize: vertical; min-height: 110px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); font-size: 13px; }
+  label.field { display: block; margin-top: 12px; margin-bottom: 4px; color: var(--muted); font-size: 13px; }
+
+  /* dropzone */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 28px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .dropzone:hover, .dropzone.drag { background: var(--accent-soft); border-color: var(--accent); }
+  .dropzone .icon { font-size: 34px; margin-bottom: 6px; }
+  .filelist { list-style: none; margin: 12px 0 0; padding: 0; }
+  .filelist li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
+    background: var(--bg);
+  }
+  .filelist .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filelist .fsize { color: var(--muted); font-size: 13px; }
+
+  /* saved prompts */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid transparent;
+    border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip .x { opacity: .6; font-weight: 700; padding: 0 2px; }
+  .chip .x:hover { opacity: 1; color: var(--danger); }
+  .chip.active { background: var(--accent); color: #fff; }
+
+  /* result */
+  #result {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+    padding: 14px 16px; min-height: 60px; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-word; font-size: 15px;
+  }
+  #result:empty::before { content: "Výsledek se zobrazí zde…"; color: var(--muted); }
+
+  .status { font-size: 14px; margin-top: 10px; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+    border: 2px solid var(--accent-soft); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: none; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--panel); border-radius: var(--radius); padding: 20px; width: min(460px, 92vw); box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto; }
+  .modal h3 { margin: 0 0 6px; }
+
+  /* history */
+  .hist-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; background: var(--bg); }
+  .hist-item summary { padding: 10px 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .hist-item summary .when { color: var(--muted); font-size: 13px; }
+  .hist-item .hist-body { padding: 0 12px 12px; white-space: pre-wrap; font-size: 14px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="logo">📄</span> Scan dokumentů</h1>
+    <button id="btnSettings" title="Nastavení">⚙️ Nastavení</button>
+  </header>
+
+  <!-- 1. Dokumenty -->
+  <div class="panel">
+    <h2>1 · Dokumenty (PDF / JPG / TXT / DOCX)</h2>
+    <div class="dropzone" id="dropzone">
+      <div class="icon">📎</div>
+      <div><strong>Přetáhněte soubory sem</strong> nebo klikněte pro výběr</div>
+      <div class="muted">PDF, JPG, PNG, WEBP, GIF, TXT, DOCX (CSV a MD také)</div>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt,.md,.csv,.doc,.docx,application/pdf,image/*,text/plain" multiple hidden>
+    <ul class="filelist" id="fileList"></ul>
+  </div>
+
+  <!-- 2. Prompt -->
+  <div class="panel">
+    <h2>2 · Prompt — co chcete z dokumentu vytěžit</h2>
+    <div class="chips" id="promptChips"></div>
+    <textarea id="promptText" placeholder="Např.: Z faktury vypiš dodavatele, IČO, číslo faktury, datum splatnosti a celkovou částku s DPH."></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button id="btnSavePrompt" class="small">💾 Uložit prompt</button>
+      <button id="btnClearPrompt" class="small">🗑️ Vymazat</button>
+      <span class="muted">Uložené prompty najdete nahoře jako štítky — kliknutím se načtou.</span>
+    </div>
+  </div>
+
+  <!-- 3. Spustit -->
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <button id="btnRun" class="primary">🔍 Vytěžit informace</button>
+      <div class="row" id="modelRow" hidden>
+        <label class="muted" for="modelSelect">Model:</label>
+        <select id="modelSelect" style="width:auto;">
+          <option value="claude-opus-5" selected>Claude Opus 5 (nejchytřejší)</option>
+          <option value="claude-sonnet-5">Claude Sonnet 5 (rychlejší)</option>
+          <option value="claude-haiku-4-5">Claude Haiku 4.5 (nejlevnější)</option>
+        </select>
+      </div>
+      <span class="muted" id="makeNote">Zpracování: Make → AI agent (scénář ScanDokumentu_Vytezeni)</span>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <!-- 4. Výsledek -->
+  <div class="panel">
+    <h2>3 · Výsledek</h2>
+    <div id="result"></div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btnCopy" class="small">📋 Kopírovat</button>
+      <button id="btnDownload" class="small">⬇️ Stáhnout jako .txt</button>
+    </div>
+  </div>
+
+  <!-- Historie -->
+  <div class="panel">
+    <h2>Historie (posledních 20)</h2>
+    <div id="history"></div>
+    <button id="btnClearHistory" class="small danger" style="margin-top:6px;">Smazat historii</button>
+  </div>
+
+  <footer>Prompty a historie se ukládají pouze v tomto prohlížeči.<br>
+  Dokumenty se odesílají ke zpracování do vašeho scénáře Make (ScanDokumentu_Vytezeni), případně přímo na Claude API.</footer>
+</div>
+
+<!-- Modal: nastavení -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <h3>⚙️ Nastavení</h3>
+    <label class="field" for="modeSelect">Způsob zpracování</label>
+    <select id="modeSelect">
+      <option value="make">Přes Make (doporučeno — nic dalšího nepotřebujete)</option>
+      <option value="api">Přímo Claude API (vlastní API klíč)</option>
+    </select>
+
+    <div id="makeSettings">
+      <label class="field" for="webhookInput">Adresa Make webhooku</label>
+      <input type="text" id="webhookInput" placeholder="https://hook.eu2.make.com/…">
+      <p class="muted">Dokument + prompt se pošlou do scénáře <strong>ScanDokumentu_Vytezeni</strong> ve vašem Make účtu. Model AI změníte přímo ve scénáři (modul „Run an agent").</p>
+    </div>
+
+    <div id="apiSettings" hidden>
+      <label class="field" for="apiKeyInput">Anthropic API klíč</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-…" autocomplete="off">
+      <p class="muted">Klíč získáte na <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> (Settings → API keys). Ukládá se pouze do tohoto prohlížeče.</p>
+    </div>
+
+    <div class="row" style="justify-content:flex-end; margin-top:14px;">
+      <button id="btnCloseSettings">Zavřít</button>
+      <button id="btnSaveSettings" class="primary" style="font-size:14px; padding:8px 16px;">Uložit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: uložit prompt -->
+<div class="modal-bg" id="saveModal">
+  <div class="modal">
+    <h3>💾 Uložit prompt</h3>
+    <label class="field" for="promptNameInput">Název promptu</label>
+    <input type="text" id="promptNameInput" placeholder="Např. Faktura — základní údaje">
+    <div class="row" style="justify-content:flex-end; margin-top:14px;">
+      <button id="btnCancelSave">Zrušit</button>
+      <button id="btnConfirmSave" class="primary" style="font-size:14px; padding:8px 16px;">Uložit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+/* Bezpečné úložiště — když je localStorage nedostupné (anonymní okno apod.), drží data jen v paměti */
+const store = (() => {
+  try {
+    localStorage.setItem("__test", "1");
+    localStorage.removeItem("__test");
+    return localStorage;
+  } catch {
+    const mem = {};
+    return {
+      getItem: k => (k in mem ? mem[k] : null),
+      setItem: (k, v) => { mem[k] = String(v); },
+      removeItem: k => { delete mem[k]; }
+    };
+  }
+})();
+
+const DEFAULT_WEBHOOK = "https://hook.eu2.make.com/zedo2wydnawxx5a2dhyuyoxfypuuuhwx";
+const LS_MODE = "scandok_mode";
+const LS_WEBHOOK = "scandok_webhook";
+const LS_KEY = "scandok_apikey";
+const LS_PROMPTS = "scandok_prompts";
+const LS_HISTORY = "scandok_history";
+const MAX_FILE_MB = 20;
+const MAX_FILE_MB_MAKE = 5; // limit velikosti payloadu Make webhooku
+
+let files = []; // {name, size, mediaType, base64}
+let running = false;
+let rawResult = "";
+
+/* ---------- Nastavení ---------- */
+function getMode() { return store.getItem(LS_MODE) || "make"; }
+function getWebhook() { return store.getItem(LS_WEBHOOK) || DEFAULT_WEBHOOK; }
+function getKey() { return store.getItem(LS_KEY) || ""; }
+
+function refreshModeUI() {
+  const make = getMode() === "make";
+  $("modelRow").hidden = make;
+  $("makeNote").hidden = !make;
+}
+function refreshSettingsModal() {
+  const make = $("modeSelect").value === "make";
+  $("makeSettings").hidden = !make;
+  $("apiSettings").hidden = make;
+}
+$("btnSettings").onclick = () => {
+  $("modeSelect").value = getMode();
+  $("webhookInput").value = getWebhook();
+  $("apiKeyInput").value = getKey();
+  refreshSettingsModal();
+  $("settingsModal").classList.add("open");
+};
+$("modeSelect").onchange = refreshSettingsModal;
+$("btnCloseSettings").onclick = () => $("settingsModal").classList.remove("open");
+$("btnSaveSettings").onclick = () => {
+  store.setItem(LS_MODE, $("modeSelect").value);
+  store.setItem(LS_WEBHOOK, $("webhookInput").value.trim() || DEFAULT_WEBHOOK);
+  store.setItem(LS_KEY, $("apiKeyInput").value.trim());
+  $("settingsModal").classList.remove("open");
+  refreshModeUI();
+  setStatus("Nastavení uloženo.", "ok");
+};
+
+/* ---------- Soubory ---------- */
+const dz = $("dropzone");
+dz.onclick = () => $("fileInput").click();
+dz.ondragover = e => { e.preventDefault(); dz.classList.add("drag"); };
+dz.ondragleave = () => dz.classList.remove("drag");
+dz.ondrop = e => { e.preventDefault(); dz.classList.remove("drag"); addFiles(e.dataTransfer.files); };
+$("fileInput").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
+
+const MEDIA = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+const TEXT_EXT = ["txt", "md", "csv"];
+const MAX_TEXT_CHARS = 300000;
+
+/* Dekódování textu — zkusí UTF-8, při chybě středoevropské Windows-1250 */
+function decodeText(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch { return new TextDecoder("windows-1250").decode(buf); }
+}
+
+/* Vytažení textu z DOCX (ZIP → word/document.xml) — bez externích knihoven */
+async function extractDocxText(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(arrayBuffer);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("soubor není platný DOCX");
+  const cdCount = view.getUint16(eocd + 10, true);
+  let p = view.getUint32(eocd + 16, true);
+  const td = new TextDecoder();
+  let entry = null;
+  for (let i = 0; i < cdCount; i++) {
+    if (view.getUint32(p, true) !== 0x02014b50) break;
+    const method = view.getUint16(p + 10, true);
+    const compSize = view.getUint32(p + 20, true);
+    const nameLen = view.getUint16(p + 28, true);
+    const extraLen = view.getUint16(p + 30, true);
+    const commentLen = view.getUint16(p + 32, true);
+    const localOffset = view.getUint32(p + 42, true);
+    const name = td.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (name === "word/document.xml") { entry = { method, compSize, localOffset }; break; }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  if (!entry) throw new Error("v DOCX chybí obsah dokumentu");
+  const lp = entry.localOffset;
+  const dataStart = lp + 30 + view.getUint16(lp + 26, true) + view.getUint16(lp + 28, true);
+  const data = bytes.subarray(dataStart, dataStart + entry.compSize);
+  let xmlBytes;
+  if (entry.method === 0) {
+    xmlBytes = data;
+  } else {
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    xmlBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return new TextDecoder("utf-8").decode(xmlBytes)
+    .replace(/<w:tab[^>]*\/>/g, "\t")
+    .replace(/<w:br[^>]*\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(+n))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function addFiles(list) {
+  for (const f of list) {
+    const ext = f.name.split(".").pop().toLowerCase();
+    if (ext === "doc") {
+      setStatus(`Soubor „${f.name}" je starý formát .doc — uložte ho ve Wordu jako .docx (nebo PDF) a vložte znovu.`, "err");
+      continue;
+    }
+    const isText = TEXT_EXT.includes(ext) || ext === "docx";
+    const mediaType = MEDIA[ext] || f.type;
+    if (!isText && !Object.values(MEDIA).includes(mediaType)) {
+      setStatus(`Soubor „${f.name}" má nepodporovaný formát. Podporováno: PDF, JPG, PNG, WEBP, GIF, TXT, DOCX.`, "err");
+      continue;
+    }
+    if (f.size > MAX_FILE_MB * 1024 * 1024) {
+      setStatus(`Soubor „${f.name}" je příliš velký (max ${MAX_FILE_MB} MB).`, "err");
+      continue;
+    }
+    try {
+      const buf = await f.arrayBuffer();
+      if (isText) {
+        let text = ext === "docx" ? await extractDocxText(buf) : decodeText(buf);
+        if (!text.trim()) { setStatus(`Soubor „${f.name}" neobsahuje žádný text.`, "err"); continue; }
+        if (text.length > MAX_TEXT_CHARS) {
+          text = text.slice(0, MAX_TEXT_CHARS);
+          setStatus(`Soubor „${f.name}" je velmi dlouhý — použito prvních ${MAX_TEXT_CHARS.toLocaleString("cs-CZ")} znaků.`, "err");
+        }
+        files.push({ name: f.name, size: f.size, mediaType: "text/plain", text });
+      } else {
+        let bin = "";
+        const chunk = 0x8000;
+        const u8 = new Uint8Array(buf);
+        for (let i = 0; i < u8.length; i += chunk) bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+        files.push({ name: f.name, size: f.size, mediaType, base64: btoa(bin) });
+      }
+      renderFiles();
+    } catch (e) {
+      setStatus(`Soubor „${f.name}" se nepodařilo přečíst${e && e.message ? " (" + e.message + ")" : ""}.`, "err");
+    }
+  }
+}
+
+function renderFiles() {
+  const ul = $("fileList");
+  ul.innerHTML = "";
+  files.forEach((f, i) => {
+    const li = document.createElement("li");
+    const icon = document.createElement("span");
+    icon.textContent = f.text != null ? "📄" : (f.mediaType === "application/pdf" ? "📕" : "🖼️");
+    const name = document.createElement("span");
+    name.className = "fname"; name.textContent = f.name;
+    const size = document.createElement("span");
+    size.className = "fsize"; size.textContent = (f.size / 1024 / 1024).toFixed(2) + " MB";
+    const del = document.createElement("button");
+    del.className = "small danger"; del.textContent = "✕"; del.title = "Odebrat";
+    del.onclick = () => { files.splice(i, 1); renderFiles(); };
+    li.append(icon, name, size, del);
+    ul.appendChild(li);
+  });
+}
+
+/* ---------- Uložené prompty ---------- */
+function getPrompts() { try { return JSON.parse(store.getItem(LS_PROMPTS)) || []; } catch { return []; } }
+function setPrompts(p) { store.setItem(LS_PROMPTS, JSON.stringify(p)); }
+
+function renderPrompts() {
+  const box = $("promptChips");
+  box.innerHTML = "";
+  const prompts = getPrompts();
+  if (!prompts.length) {
+    box.innerHTML = '<span class="muted">Zatím žádné uložené prompty. Napište prompt níže a klikněte na „Uložit prompt".</span>';
+    return;
+  }
+  prompts.forEach((p, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    const label = document.createElement("span");
+    label.textContent = p.name;
+    label.title = p.text;
+    chip.appendChild(label);
+    const x = document.createElement("span");
+    x.className = "x"; x.textContent = "✕"; x.title = "Smazat tento prompt";
+    x.onclick = ev => {
+      ev.stopPropagation();
+      if (confirm(`Smazat prompt „${p.name}"?`)) {
+        const arr = getPrompts(); arr.splice(i, 1); setPrompts(arr); renderPrompts();
+      }
+    };
+    chip.appendChild(x);
+    chip.onclick = () => {
+      $("promptText").value = p.text;
+      document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+    };
+    box.appendChild(chip);
+  });
+}
+
+$("btnSavePrompt").onclick = () => {
+  if (!$("promptText").value.trim()) { setStatus("Nejdřív napište prompt.", "err"); return; }
+  $("promptNameInput").value = "";
+  $("saveModal").classList.add("open");
+  $("promptNameInput").focus();
+};
+$("btnCancelSave").onclick = () => $("saveModal").classList.remove("open");
+$("btnConfirmSave").onclick = () => {
+  const name = $("promptNameInput").value.trim();
+  if (!name) return;
+  const arr = getPrompts();
+  const existing = arr.findIndex(p => p.name === name);
+  const item = { name, text: $("promptText").value.trim() };
+  if (existing >= 0) arr[existing] = item; else arr.push(item);
+  setPrompts(arr);
+  $("saveModal").classList.remove("open");
+  renderPrompts();
+  setStatus(`Prompt „${name}" uložen.`, "ok");
+};
+$("promptNameInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnConfirmSave").click(); });
+$("btnClearPrompt").onclick = () => { $("promptText").value = ""; document.querySelectorAll(".chip").forEach(c => c.classList.remove("active")); };
+
+/* ---------- Historie ---------- */
+function getHistory() { try { return JSON.parse(store.getItem(LS_HISTORY)) || []; } catch { return []; } }
+function addHistory(entry) {
+  const h = getHistory();
+  h.unshift(entry);
+  while (h.length > 20) h.pop();
+  try { store.setItem(LS_HISTORY, JSON.stringify(h)); } catch { /* plné úložiště — historii přeskočíme */ }
+  renderHistory();
+}
+function renderHistory() {
+  const box = $("history");
+  box.innerHTML = "";
+  const h = getHistory();
+  if (!h.length) { box.innerHTML = '<span class="muted">Zatím žádné záznamy.</span>'; return; }
+  h.forEach(item => {
+    const det = document.createElement("details");
+    det.className = "hist-item";
+    const sum = document.createElement("summary");
+    const when = document.createElement("span");
+    when.className = "when"; when.textContent = item.when;
+    const what = document.createElement("strong");
+    what.textContent = item.files;
+    sum.append(when, what);
+    det.appendChild(sum);
+    const body = document.createElement("div");
+    body.className = "hist-body";
+    body.textContent = "PROMPT:\n" + item.prompt + "\n\nVÝSLEDEK:\n" + item.result;
+    det.appendChild(body);
+    box.appendChild(det);
+  });
+}
+$("btnClearHistory").onclick = () => {
+  if (confirm("Opravdu smazat celou historii?")) { store.removeItem(LS_HISTORY); renderHistory(); }
+};
+
+/* ---------- Stav ---------- */
+function setStatus(msg, cls) {
+  const el = $("status");
+  el.className = "status" + (cls ? " " + cls : "");
+  el.innerHTML = "";
+  if (cls === "run") {
+    const sp = document.createElement("span"); sp.className = "spinner"; el.appendChild(sp);
+  }
+  el.appendChild(document.createTextNode(msg));
+}
+
+/* ---------- Spuštění ---------- */
+$("btnRun").onclick = async () => {
+  if (running) return;
+  if (!files.length) { setStatus("Vložte alespoň jeden dokument (PDF nebo obrázek).", "err"); return; }
+  const prompt = $("promptText").value.trim();
+  if (!prompt) { setStatus("Napište prompt — co chcete z dokumentu vytěžit.", "err"); return; }
+
+  running = true;
+  $("btnRun").disabled = true;
+  rawResult = "";
+  $("result").innerHTML = "";
+
+  try {
+    if (getMode() === "make") {
+      await runViaMake(prompt);
+    } else {
+      await runViaApi(prompt);
+    }
+    if (rawResult) {
+      addHistory({
+        when: new Date().toLocaleString("cs-CZ"),
+        files: files.map(f => f.name).join(", "),
+        prompt,
+        result: rawResult
+      });
+    }
+  } catch (e) {
+    if (e instanceof TypeError) {
+      setStatus("Nepodařilo se připojit — zkontrolujte připojení k internetu.", "err");
+    } else {
+      setStatus(e.message, "err");
+    }
+  } finally {
+    running = false;
+    $("btnRun").disabled = false;
+  }
+};
+
+/* ---------- Zpracování přes Make ---------- */
+async function runViaMake(prompt) {
+  const url = getWebhook();
+  if (!url) { throw new Error("V Nastavení chybí adresa Make webhooku."); }
+  const tooBig = files.find(f => f.base64 && f.size > MAX_FILE_MB_MAKE * 1024 * 1024);
+  if (tooBig) {
+    throw new Error(`Soubor „${tooBig.name}" je pro zpracování přes Make příliš velký (max ~${MAX_FILE_MB_MAKE} MB). Přepněte v Nastavení na přímé Claude API, nebo soubor zmenšete.`);
+  }
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    setStatus(files.length > 1
+      ? `Zpracovávám soubor ${i + 1} z ${files.length}: ${f.name}…`
+      : "Zpracovávám dokument…", "run");
+
+    const fd = new FormData();
+    if (f.text != null) {
+      fd.append("prompt", prompt + `\n\n=== Obsah dokumentu „${f.name}" ===\n` + f.text);
+      fd.append("data", "");
+    } else {
+      fd.append("prompt", prompt);
+      fd.append("mediaType", f.mediaType);
+      fd.append("data", f.base64);
+    }
+    fd.append("filename", f.name);
+
+    const resp = await fetch(url, { method: "POST", body: fd });
+    const text = (await resp.text()).trim();
+
+    if (!resp.ok) {
+      throw new Error(`Make vrátil chybu ${resp.status}${text ? ": " + text.slice(0, 300) : ""}. Zkontrolujte, že scénář ScanDokumentu_Vytezeni je v Make zapnutý.`);
+    }
+    if (text === "Accepted") {
+      throw new Error("Zpracování v Make trvá déle než 40 s, takže odpověď nedorazila do prohlížeče. Výsledek najdete v historii běhů scénáře v Make. Pro velké dokumenty přepněte v Nastavení na přímé Claude API.");
+    }
+
+    if (files.length > 1) rawResult += (rawResult ? "\n\n" : "") + "## " + f.name + "\n\n";
+    rawResult += text;
+    $("result").textContent = rawResult;
+  }
+  setStatus("Hotovo ✓", "ok");
+}
+
+/* ---------- Zpracování přímo přes Claude API ---------- */
+async function runViaApi(prompt) {
+  const key = getKey();
+  if (!key) {
+    $("btnSettings").click();
+    throw new Error("Pro přímé volání Claude API vložte v Nastavení svůj API klíč.");
+  }
+  setStatus("Zpracovávám dokument…", "run");
+
+  const model = $("modelSelect").value;
+  const content = [];
+  for (const f of files) {
+    if (f.text != null) {
+      content.push({ type: "text", text: `=== Obsah dokumentu „${f.name}" ===\n` + f.text });
+    } else if (f.mediaType === "application/pdf") {
+      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.base64 } });
+    } else {
+      content.push({ type: "image", source: { type: "base64", media_type: f.mediaType, data: f.base64 } });
+    }
+  }
+  content.push({ type: "text", text: prompt });
+
+  const body = {
+    model,
+    max_tokens: 16000,
+    stream: true,
+    system: "Jsi asistent pro vytěžování informací z dokumentů. Odpovídej česky (pokud uživatel nechce jinak), stručně a přesně. Vypisuj pouze informace, které v dokumentu skutečně jsou; pokud požadovaná informace v dokumentu chybí, napiš to výslovně. Nepřidávej žádné vymyšlené údaje. Výstup piš VŽDY jako prostý text: každý údaj na samostatný řádek ve tvaru Název údaje: hodnota. NIKDY nepoužívej tabulky, Markdown formátování (žádné |, #, ** ani hvězdičky) ani HTML.",
+    messages: [{ role: "user", content }]
+  };
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-key": key,
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true"
+  };
+  if (model === "claude-opus-5") {
+    body.fallbacks = "default";
+    headers["anthropic-beta"] = "server-side-fallback-2026-07-01";
+  }
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST", headers, body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    let msg = "Chyba " + resp.status;
+    try {
+      const err = await resp.json();
+      if (err.error && err.error.message) msg += ": " + err.error.message;
+    } catch {}
+    if (resp.status === 401) msg = "Neplatný API klíč — zkontrolujte ho v Nastavení.";
+    if (resp.status === 429) msg = "Překročen limit požadavků — chvíli počkejte a zkuste to znovu.";
+    if (resp.status === 413) msg = "Dokumenty jsou dohromady příliš velké — odeberte některé soubory.";
+    throw new Error(msg);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let stopReason = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop();
+    for (const part of parts) {
+      const dataLine = part.split("\n").find(l => l.startsWith("data: "));
+      if (!dataLine) continue;
+      let ev;
+      try { ev = JSON.parse(dataLine.slice(6)); } catch { continue; }
+      if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") {
+        rawResult += ev.delta.text;
+        $("result").textContent = rawResult;
+      } else if (ev.type === "message_delta" && ev.delta && ev.delta.stop_reason) {
+        stopReason = ev.delta.stop_reason;
+      } else if (ev.type === "error") {
+        throw new Error(ev.error && ev.error.message ? ev.error.message : "Chyba streamu");
+      }
+    }
+  }
+
+  if (stopReason === "refusal") {
+    setStatus("Model odmítl požadavek zpracovat (bezpečnostní filtr). Zkuste upravit prompt.", "err");
+  } else if (stopReason === "max_tokens") {
+    setStatus("Hotovo, ale odpověď byla zkrácena (limit délky). Zkuste upřesnit prompt na méně údajů.", "ok");
+  } else {
+    setStatus("Hotovo ✓", "ok");
+  }
+}
+
+/* ---------- Kopírovat / stáhnout ---------- */
+$("btnCopy").onclick = async () => {
+  if (!rawResult) { setStatus("Není co kopírovat.", "err"); return; }
+  let ok = false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(rawResult); ok = true; } catch {}
+  }
+  if (!ok) {
+    // záložní metoda — funguje i na stránce otevřené ze souboru (file://)
+    const ta = document.createElement("textarea");
+    ta.value = rawResult;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+  }
+  if (ok) setStatus("Zkopírováno do schránky ✓", "ok");
+  else setStatus("Kopírování se nepodařilo — označte text ručně a použijte Cmd+C.", "err");
+};
+$("btnDownload").onclick = () => {
+  if (!rawResult) { setStatus("Není co stáhnout.", "err"); return; }
+  const blob = new Blob([rawResult], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "vytezeni-" + new Date().toISOString().slice(0, 10) + ".txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+/* ---------- Init ---------- */
+renderPrompts();
+renderHistory();
+refreshModeUI();
+</script>
+</body>
+</html>
