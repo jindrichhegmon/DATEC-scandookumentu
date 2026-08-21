@@ -1,0 +1,4 @@
+# Funkce pro načítání webových odkazů (obchází CORS omezení prohlížeče)
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"

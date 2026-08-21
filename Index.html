@@ -112,7 +112,18 @@
     background: var(--bg);
   }
   .filelist .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .filelist .fsize { color: var(--muted); font-size: 13px; }
+  .filelist .fsize { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .filelist .fsrc { color: var(--muted); font-size: 12px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* odkaz na web */
+  .urlbox { margin-top: 14px; }
+  .urlbox .row { flex-wrap: nowrap; }
+  .urlbox input[type=text] { flex: 1; min-width: 0; }
+  .urlbox button { white-space: nowrap; }
+  @media (max-width: 560px) {
+    .urlbox .row { flex-wrap: wrap; }
+    .urlbox input[type=text] { flex-basis: 100%; }
+  }
 
   /* saved prompts */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
@@ -171,13 +182,22 @@
 
   <!-- 1. Dokumenty -->
   <div class="panel">
-    <h2>1 · Dokumenty (PDF / JPG / TXT / DOCX)</h2>
+    <h2>1 · Dokumenty (PDF / JPG / TXT / DOCX) a odkazy na web</h2>
     <div class="dropzone" id="dropzone">
       <div class="icon">📎</div>
       <div><strong>Přetáhněte soubory sem</strong> nebo klikněte pro výběr</div>
       <div class="muted">PDF, JPG, PNG, WEBP, GIF, TXT, DOCX (CSV a MD také)</div>
     </div>
     <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt,.md,.csv,.doc,.docx,application/pdf,image/*,text/plain" multiple hidden>
+
+    <div class="urlbox">
+      <div class="row">
+        <input type="text" id="urlInput" placeholder="https://… odkaz na stránku, PDF nebo obrázek" autocomplete="url" spellcheck="false">
+        <button id="btnAddUrl">🌐 Načíst odkaz</button>
+      </div>
+      <div class="muted" style="margin-top:6px;">Z odkazu se stáhne text stránky (u PDF nebo obrázku rovnou soubor) a přidá se do seznamu níže — prompt pak běží nad ním stejně jako nad nahraným dokumentem.</div>
+    </div>
+
     <ul class="filelist" id="fileList"></ul>
   </div>
 
@@ -228,7 +248,8 @@
   </div>
 
   <footer>Prompty a historie se ukládají pouze v tomto prohlížeči.<br>
-  Dokumenty se odesílají ke zpracování do vašeho scénáře Make (ScanDokumentu_Vytezeni), případně přímo na Claude API.</footer>
+  Dokumenty se odesílají ke zpracování do vašeho scénáře Make (ScanDokumentu_Vytezeni), případně přímo na Claude API.<br>
+  Odkazy na web načítá funkce nasazená spolu s tímto webem; pokud není k dispozici, zkusí se stránka stáhnout přímo z prohlížeče.</footer>
 </div>
 
 <!-- Modal: nastavení -->
@@ -446,23 +467,202 @@ async function addFiles(list) {
   }
 }
 
+function fmtSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " kB";
+  return (bytes / 1024 / 1024).toFixed(2) + " MB";
+}
+
+function fileIcon(f) {
+  if (f.url) return "🌐";
+  if (f.text != null) return "📄";
+  return f.mediaType === "application/pdf" ? "📕" : "🖼️";
+}
+
 function renderFiles() {
   const ul = $("fileList");
   ul.innerHTML = "";
   files.forEach((f, i) => {
     const li = document.createElement("li");
     const icon = document.createElement("span");
-    icon.textContent = f.text != null ? "📄" : (f.mediaType === "application/pdf" ? "📕" : "🖼️");
+    icon.textContent = fileIcon(f);
+    const wrap = document.createElement("span");
+    wrap.className = "fname";
     const name = document.createElement("span");
-    name.className = "fname"; name.textContent = f.name;
+    name.textContent = f.name;
+    wrap.appendChild(name);
+    if (f.url) {
+      const src = document.createElement("span");
+      src.className = "fsrc"; src.textContent = f.url; src.title = f.url;
+      wrap.appendChild(src);
+    }
     const size = document.createElement("span");
-    size.className = "fsize"; size.textContent = (f.size / 1024 / 1024).toFixed(2) + " MB";
+    size.className = "fsize"; size.textContent = fmtSize(f.size);
     const del = document.createElement("button");
     del.className = "small danger"; del.textContent = "✕"; del.title = "Odebrat";
     del.onclick = () => { files.splice(i, 1); renderFiles(); };
-    li.append(icon, name, size, del);
+    li.append(icon, wrap, size, del);
     ul.appendChild(li);
   });
+}
+
+/* ---------- Odkaz na web ---------- */
+const FUNCTION_URL = "/.netlify/functions/fetch-url";
+const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "SVG", "IFRAME", "TEMPLATE", "CANVAS", "OBJECT", "EMBED", "AUDIO", "VIDEO"]);
+const BLOCK_TAGS = new Set(["ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DIV", "DL", "DT", "FIELDSET", "FIGCAPTION", "FIGURE",
+  "FOOTER", "FORM", "H1", "H2", "H3", "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE",
+  "SECTION", "TABLE", "TBODY", "TFOOT", "THEAD", "TR", "UL"]);
+
+/* Převod HTML na čitelný text — bez externích knihoven */
+function htmlToText(root) {
+  let out = "";
+  (function walk(node) {
+    if (node.nodeType === 3) { out += node.nodeValue.replace(/\s+/g, " "); return; }
+    if (node.nodeType !== 1) return;
+    const tag = node.tagName.toUpperCase();
+    if (SKIP_TAGS.has(tag)) return;
+    if (node.hidden || node.getAttribute("aria-hidden") === "true") return;
+    if (tag === "BR") { out += "\n"; return; }
+    const block = BLOCK_TAGS.has(tag);
+    if (block && !/\n$/.test(out)) out += "\n";
+    for (const child of node.childNodes) walk(child);
+    if ((tag === "TD" || tag === "TH") && node.nextElementSibling) out += "\t";
+    if (block && !/\n$/.test(out)) out += "\n";
+  })(root);
+  return out
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/ {2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/* Z HTML vytáhne titulek a hlavní text (preferuje <main> / <article>) */
+function parseHtmlPage(html, url) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const title = (doc.querySelector("title")?.textContent || "").trim();
+  let root = doc.querySelector("main") || doc.querySelector("article") || doc.body || doc.documentElement;
+  let text = htmlToText(root);
+  if (text.length < 200 && doc.body && root !== doc.body) text = htmlToText(doc.body);
+  const desc = (doc.querySelector('meta[name="description"]')?.getAttribute("content") || "").trim();
+  if (desc && !text.includes(desc)) text = desc + "\n\n" + text;
+  return { title: title || new URL(url).hostname, text };
+}
+
+/* Načtení odkazu — nejdřív přes funkci nasazenou u webu, pak přímo z prohlížeče */
+async function fetchLink(url) {
+  const viaFunction = location.protocol === "http:" || location.protocol === "https:";
+  const errors = [];
+
+  if (viaFunction) {
+    try {
+      const resp = await fetch(FUNCTION_URL + "?url=" + encodeURIComponent(url));
+      const data = await resp.json().catch(() => null);
+      if (resp.ok && data && data.body != null) return data;
+      if (data && data.error) errors.push(data.error);
+      else errors.push("načítací funkce vrátila chybu " + resp.status);
+    } catch {
+      errors.push("načítací funkce není dostupná");
+    }
+  }
+
+  // Záloha: přímé stažení z prohlížeče (funguje jen u stránek, které to povolují přes CORS)
+  try {
+    const resp = await fetch(url, { redirect: "follow" });
+    if (!resp.ok) throw new Error("server stránky vrátil chybu " + resp.status);
+    const contentType = (resp.headers.get("content-type") || "text/html").toLowerCase();
+    const isText = /^(text\/|application\/(json|xml|xhtml\+xml))/.test(contentType);
+    if (isText) {
+      return { finalUrl: resp.url || url, contentType, encoding: "text", body: await resp.text() };
+    }
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < buf.length; i += chunk) bin += String.fromCharCode.apply(null, buf.subarray(i, i + chunk));
+    return { finalUrl: resp.url || url, contentType, encoding: "base64", body: btoa(bin) };
+  } catch (e) {
+    if (e && e.message && !/Failed to fetch|NetworkError|Load failed/i.test(e.message)) errors.push(e.message);
+    else errors.push("prohlížeč nesmí stránku načíst přímo (CORS)");
+  }
+
+  throw new Error("Odkaz se nepodařilo načíst — " + errors.join("; ") + ".");
+}
+
+async function addUrl(rawUrl) {
+  let url = rawUrl.trim();
+  if (!url) { setStatus("Vložte adresu odkazu.", "err"); return; }
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  let parsed;
+  try { parsed = new URL(url); } catch { setStatus("Adresa odkazu není platná.", "err"); return; }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    setStatus("Podporovány jsou pouze odkazy http:// a https://.", "err");
+    return;
+  }
+
+  const btn = $("btnAddUrl");
+  btn.disabled = true;
+  setStatus(`Načítám odkaz ${parsed.hostname}…`, "run");
+  try {
+    const data = await fetchLink(url);
+    const finalUrl = data.finalUrl || url;
+    const ct = (data.contentType || "").toLowerCase();
+
+    if (data.encoding === "base64") {
+      const mediaType = ct.split(";")[0].trim();
+      if (mediaType !== "application/pdf" && !Object.values(MEDIA).includes(mediaType)) {
+        throw new Error(`Odkaz vrací nepodporovaný typ obsahu (${mediaType || "neznámý"}). Podporováno: webová stránka, PDF, JPG, PNG, WEBP, GIF, text.`);
+      }
+      const size = Math.round(data.body.length * 3 / 4);
+      if (size > MAX_FILE_MB * 1024 * 1024) throw new Error(`Soubor z odkazu je příliš velký (max ${MAX_FILE_MB} MB).`);
+      files.push({
+        name: decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname),
+        size, mediaType, base64: data.body, url: finalUrl
+      });
+      renderFiles();
+      $("urlInput").value = "";
+      setStatus("Soubor z odkazu načten ✓", "ok");
+      return;
+    }
+
+    let title, text;
+    if (/html|xml/.test(ct)) {
+      ({ title, text } = parseHtmlPage(data.body, finalUrl));
+    } else {
+      title = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname);
+      text = data.body;
+    }
+    text = (text || "").trim();
+    if (!text) throw new Error("Na stránce se nepodařilo najít žádný text (obsah se nejspíš dokresluje až skriptem v prohlížeči).");
+    if (text.length > MAX_TEXT_CHARS) {
+      text = text.slice(0, MAX_TEXT_CHARS);
+      setStatus(`Stránka je velmi dlouhá — použito prvních ${MAX_TEXT_CHARS.toLocaleString("cs-CZ")} znaků.`, "err");
+    }
+    files.push({
+      name: title.slice(0, 120),
+      size: new Blob([text]).size,
+      mediaType: "text/plain",
+      text,
+      url: finalUrl
+    });
+    renderFiles();
+    $("urlInput").value = "";
+    if (text.length <= MAX_TEXT_CHARS) setStatus("Stránka načtena ✓", "ok");
+  } catch (e) {
+    setStatus(e instanceof TypeError ? "Nepodařilo se připojit — zkontrolujte připojení k internetu." : e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("btnAddUrl").onclick = () => addUrl($("urlInput").value);
+$("urlInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addUrl($("urlInput").value); } });
+
+/* Popisek zdroje vkládaný do promptu */
+function sourceHeader(f) {
+  return f.url
+    ? `=== Obsah webové stránky „${f.name}" (${f.url}) ===\n`
+    : `=== Obsah dokumentu „${f.name}" ===\n`;
 }
 
 /* ---------- Uložené prompty ---------- */
@@ -573,7 +773,7 @@ function setStatus(msg, cls) {
 /* ---------- Spuštění ---------- */
 $("btnRun").onclick = async () => {
   if (running) return;
-  if (!files.length) { setStatus("Vložte alespoň jeden dokument (PDF nebo obrázek).", "err"); return; }
+  if (!files.length) { setStatus("Vložte alespoň jeden dokument nebo načtěte odkaz na web.", "err"); return; }
   const prompt = $("promptText").value.trim();
   if (!prompt) { setStatus("Napište prompt — co chcete z dokumentu vytěžit.", "err"); return; }
 
@@ -625,7 +825,7 @@ async function runViaMake(prompt) {
 
     const fd = new FormData();
     if (f.text != null) {
-      fd.append("prompt", prompt + `\n\n=== Obsah dokumentu „${f.name}" ===\n` + f.text);
+      fd.append("prompt", prompt + "\n\n" + sourceHeader(f) + f.text);
       fd.append("data", "");
     } else {
       fd.append("prompt", prompt);
@@ -664,7 +864,7 @@ async function runViaApi(prompt) {
   const content = [];
   for (const f of files) {
     if (f.text != null) {
-      content.push({ type: "text", text: `=== Obsah dokumentu „${f.name}" ===\n` + f.text });
+      content.push({ type: "text", text: sourceHeader(f) + f.text });
     } else if (f.mediaType === "application/pdf") {
       content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.base64 } });
     } else {
