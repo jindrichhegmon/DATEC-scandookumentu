@@ -1,4 +1,4 @@
-# Scan dokumenů a rozebrání AI
+# AI rozbor dokumentů a WEBů
 
 Jednostránková aplikace (`Index.html`) pro vytěžování informací z dokumentů pomocí AI.
 
