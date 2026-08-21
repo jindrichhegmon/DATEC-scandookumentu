@@ -11,10 +11,14 @@
 const dns = require("dns").promises;
 const net = require("net");
 
-const MAX_BYTES = 6 * 1024 * 1024; // 6 MB
-const TIMEOUT_MS = 25000;
+/* Netlify ukončí funkci po 10 s — vlastní rozpočet musí být kratší, aby stihla vrátit
+   srozumitelnou chybu místo holé 502/503 od Netlify. */
+const BUDGET_MS = 8000;
+/* Odpověď funkce smí mít nejvýš 6 MB, base64 obsah je o třetinu delší než originál. */
+const MAX_TEXT_BYTES = 4 * 1024 * 1024;
+const MAX_BINARY_BYTES = 3 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
-const UA = "Mozilla/5.0 (compatible; ScanDokumentu/1.0; +https://github.com/jindrichhegmon/datec-scandookumentu)";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -69,26 +73,29 @@ async function assertPublicUrl(u) {
 }
 
 /* Stahování s hlídáním velikosti */
-async function readCapped(resp) {
+async function readCapped(resp, maxBytes) {
+  const limitMb = (maxBytes / 1024 / 1024).toFixed(0);
   const len = Number(resp.headers.get("content-length") || 0);
-  if (len && len > MAX_BYTES) {
-    throw new Error(`Stránka je příliš velká (${(len / 1024 / 1024).toFixed(1)} MB, limit ${MAX_BYTES / 1024 / 1024} MB).`);
+  if (len && len > maxBytes) {
+    throw new Error(`Obsah odkazu je příliš velký (${(len / 1024 / 1024).toFixed(1)} MB, limit ${limitMb} MB).`);
   }
   const chunks = [];
   let total = 0;
   for await (const chunk of resp.body) {
     const buf = Buffer.from(chunk);
     total += buf.length;
-    if (total > MAX_BYTES) throw new Error(`Stránka je příliš velká (limit ${MAX_BYTES / 1024 / 1024} MB).`);
+    if (total > maxBytes) throw new Error(`Obsah odkazu je příliš velký (limit ${limitMb} MB).`);
     chunks.push(buf);
   }
   return Buffer.concat(chunks);
 }
 
 /* Přesměrování řešíme ručně, aby se kontrolovala i cílová adresa */
-async function fetchFollowing(startUrl) {
+async function fetchFollowing(startUrl, deadline) {
   let current = startUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const left = deadline - Date.now();
+    if (left <= 300) throw new Error("TIMEOUT");
     const u = new URL(current);
     await assertPublicUrl(u);
     const resp = await fetch(u.href, {
@@ -96,9 +103,10 @@ async function fetchFollowing(startUrl) {
       headers: {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain,image/*;q=0.8,*/*;q=0.5",
-        "Accept-Language": "cs,sk;q=0.9,en;q=0.8"
+        "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br"
       },
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.timeout(left)
     });
     if (resp.status >= 300 && resp.status < 400 && resp.headers.get("location")) {
       current = new URL(resp.headers.get("location"), u.href).href;
@@ -124,14 +132,19 @@ exports.handler = async event => {
   let parsed;
   try { parsed = new URL(target); } catch { return json(400, { error: "Neplatná adresa odkazu." }); }
 
+  const deadline = Date.now() + BUDGET_MS;
   try {
-    const { resp, finalUrl } = await fetchFollowing(parsed.href);
+    const { resp, finalUrl } = await fetchFollowing(parsed.href, deadline);
     if (!resp.ok) {
-      return json(502, { error: `Server stránky vrátil chybu ${resp.status} ${resp.statusText || ""}`.trim() + "." });
+      let msg = `Server stránky vrátil chybu ${resp.status} ${resp.statusText || ""}`.trim() + ".";
+      if ([401, 403, 405, 406, 429].includes(resp.status)) {
+        msg += " Stránka nejspíš blokuje automatické stahování — uložte ji v prohlížeči jako PDF a nahrajte jako soubor.";
+      }
+      return json(502, { error: msg });
     }
     const contentType = (resp.headers.get("content-type") || "application/octet-stream").toLowerCase();
-    const buf = await readCapped(resp);
     const isText = /^(text\/|application\/(json|xml|xhtml\+xml|javascript))/.test(contentType);
+    const buf = await readCapped(resp, isText ? MAX_TEXT_BYTES : MAX_BINARY_BYTES);
 
     return json(200, {
       finalUrl,
@@ -140,9 +153,18 @@ exports.handler = async event => {
       body: isText ? buf.toString("utf8") : buf.toString("base64")
     });
   } catch (e) {
-    const msg = e && e.name === "TimeoutError"
-      ? "Stránka neodpověděla včas (limit 25 s)."
-      : (e && e.message) || "Odkaz se nepodařilo načíst.";
-    return json(502, { error: msg });
+    const timedOut = (e && (e.name === "TimeoutError" || e.message === "TIMEOUT")) || Date.now() >= deadline;
+    if (timedOut) {
+      return json(504, { error: `Stránka neodpověděla do ${BUDGET_MS / 1000} s — server je pomalý nebo požadavek odmítá. Zkuste odkaz na konkrétní podstránku, nebo stránku uložte jako PDF a nahrajte jako soubor.` });
+    }
+    const c = e && e.cause;
+    const code = (c && c.code) || (c && Array.isArray(c.errors) && c.errors[0] && c.errors[0].code) || "";
+    let msg = (e && e.message) || "Odkaz se nepodařilo načíst";
+    if (msg === "fetch failed") {
+      msg = "Se serverem stránky se nepodařilo spojit" + (code ? ` (${code})` : "");
+    } else if (code) {
+      msg += ` (${code})`;
+    }
+    return json(502, { error: /[.!?]$/.test(msg) ? msg : msg + "." });
   }
 };
