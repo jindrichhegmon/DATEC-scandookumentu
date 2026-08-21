@@ -550,6 +550,15 @@ function parseHtmlPage(html, url) {
   return { title: title || new URL(url).hostname, text };
 }
 
+/* Chyba, kterou hlásí přímo načítací funkce — je srozumitelná, nemá smysl ji dál doplňovat */
+class LinkError extends Error {}
+
+function gatewayMessage(status) {
+  if (status === 404) return "načítací funkce není na tomto webu nasazená";
+  if (status === 502 || status === 503 || status === 504) return `načítací funkce se nestihla dokončit nebo spadla (chyba ${status})`;
+  return "načítací funkce vrátila chybu " + status;
+}
+
 /* Načtení odkazu — nejdřív přes funkci nasazenou u webu, pak přímo z prohlížeče */
 async function fetchLink(url) {
   const viaFunction = location.protocol === "http:" || location.protocol === "https:";
@@ -560,9 +569,10 @@ async function fetchLink(url) {
       const resp = await fetch(FUNCTION_URL + "?url=" + encodeURIComponent(url));
       const data = await resp.json().catch(() => null);
       if (resp.ok && data && data.body != null) return data;
-      if (data && data.error) errors.push(data.error);
-      else errors.push("načítací funkce vrátila chybu " + resp.status);
-    } catch {
+      if (data && data.error) throw new LinkError(data.error);
+      errors.push(gatewayMessage(resp.status));
+    } catch (e) {
+      if (e instanceof LinkError) throw e;
       errors.push("načítací funkce není dostupná");
     }
   }
