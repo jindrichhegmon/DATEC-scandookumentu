@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scan dokumentů — vytěžování informací</title>
+<title>AI rozbor dokumentů a WEBů</title>
+<link rel="icon" href="data:image/svg+xml,<svg%20viewBox='0%200%2032%2032'%20xmlns='http://www.w3.org/2000/svg'%20fill='none'>%20<path%20d='M7%203.5h9.6L23%209.9v15.6a2%202%200%200%201-2%202H7a2%202%200%200%201-2-2v-20a2%202%200%200%201%202-2z'%20fill='%232563eb'%20fill-opacity='.12'%20stroke='%232563eb'%20stroke-width='1.6'%20stroke-linejoin='round'/>%20<path%20d='M16.4%203.5v4.9a1.5%201.5%200%200%200%201.5%201.5h5'%20stroke='%232563eb'%20stroke-width='1.6'%20stroke-linejoin='round'/>%20<path%20d='M9%2013h8M9%2016.6h5.5'%20stroke='%232563eb'%20stroke-width='1.6'%20stroke-linecap='round'/>%20<circle%20cx='22.4'%20cy='22.4'%20r='7.4'%20fill='%23ffffff'/>%20<circle%20cx='22.4'%20cy='22.4'%20r='5.9'%20stroke='%232563eb'%20stroke-width='1.6'/>%20<path%20d='M22.4%2016.5c-1.9%201.7-2.9%203.7-2.9%205.9s1%204.2%202.9%205.9c1.9-1.7%202.9-3.7%202.9-5.9s-1-4.2-2.9-5.9z'%20stroke='%232563eb'%20stroke-width='1.3'%20stroke-linejoin='round'/>%20<path%20d='M16.9%2020.5h11M16.9%2024.3h11'%20stroke='%232563eb'%20stroke-width='1.3'%20stroke-linecap='round'/>%20</svg>">
 <style>
   :root {
     --bg: #f5f6f8;
@@ -46,7 +47,9 @@
   .wrap { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
   header h1 { font-size: 22px; margin: 0; display: flex; align-items: center; gap: 10px; }
-  header h1 .logo { font-size: 26px; }
+  header h1 .logo { display: inline-flex; color: var(--accent); }
+  header h1 .logo svg { width: 30px; height: 30px; display: block; }
+  @media (max-width: 480px) { header h1 { font-size: 19px; } header h1 .logo svg { width: 26px; height: 26px; } }
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -176,7 +179,15 @@
 <body>
 <div class="wrap">
   <header>
-    <h1><span class="logo">📄</span> Scan dokumentů</h1>
+    <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7 3.5h9.6L23 9.9v15.6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-20a2 2 0 0 1 2-2z" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M16.4 3.5v4.9a1.5 1.5 0 0 0 1.5 1.5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M9 13h8M9 16.6h5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="22.4" cy="22.4" r="7.4" fill="var(--panel)"/>
+      <circle cx="22.4" cy="22.4" r="5.9" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M22.4 16.5c-1.9 1.7-2.9 3.7-2.9 5.9s1 4.2 2.9 5.9c1.9-1.7 2.9-3.7 2.9-5.9s-1-4.2-2.9-5.9z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M16.9 20.5h11M16.9 24.3h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    </svg></span> AI rozbor dokumentů a WEBů</h1>
     <button id="btnSettings" title="Nastavení">⚙️ Nastavení</button>
   </header>
 
