@@ -168,6 +168,7 @@
   .modal-bg.open { display: flex; }
   .modal { background: var(--panel); border-radius: var(--radius); padding: 20px; width: min(460px, 92vw); box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto; }
   .modal h3 { margin: 0 0 6px; }
+  .modal.wide { width: min(780px, 94vw); }
 
   /* history */
   .hist-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; background: var(--bg); }
@@ -257,7 +258,10 @@
   <div class="panel">
     <h2>Historie (posledních 20)</h2>
     <div id="history"></div>
-    <button id="btnClearHistory" class="small danger" style="margin-top:6px;">Smazat historii</button>
+    <div class="row" style="margin-top:6px;">
+      <button id="btnSqlPreview" class="small" title="Náhled všech záznamů uložených v SQL databázi CLB1 (tabulka CLB_SCANN_DOKUMENTU)">🗄️ Náhled</button>
+      <button id="btnClearHistory" class="small danger">Smazat historii</button>
+    </div>
   </div>
 
   <footer>Prompty a historie se ukládají pouze v tomto prohlížeči; přístupový token si prohlížeč pamatuje, dokud aplikaci nezamknete v Nastavení.<br>
@@ -309,6 +313,30 @@
         <button id="btnCloseSettings">Zavřít</button>
         <button id="btnSaveSettings" class="primary" style="font-size:14px; padding:8px 16px;">Uložit</button>
       </span>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: náhled SQL záznamů -->
+<div class="modal-bg" id="sqlModal">
+  <div class="modal wide">
+    <h3>🗄️ Náhled záznamů v databázi</h3>
+    <div id="sqlAuth">
+      <p class="muted">Náhled do všech záznamů v tabulce <strong>CLB1 · CLB_SCANN_DOKUMENTU</strong> je chráněn heslem.</p>
+      <label class="field" for="sqlPassInput">Heslo</label>
+      <input type="password" id="sqlPassInput" autocomplete="off">
+      <div class="status" id="sqlStatus"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:14px;">
+        <button id="btnSqlCancel">Zavřít</button>
+        <button id="btnSqlShow" class="primary" style="font-size:14px; padding:8px 16px;">Zobrazit</button>
+      </div>
+    </div>
+    <div id="sqlResults" hidden>
+      <div class="status" id="sqlResStatus"></div>
+      <div id="sqlList" style="margin-top:8px;"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:14px;">
+        <button id="btnSqlClose">Zavřít</button>
+      </div>
     </div>
   </div>
 </div>
@@ -455,6 +483,87 @@ function lockApp() {
   try { document.cookie = "scandok_auth=; max-age=0; path=/"; } catch {}
   location.reload();
 }
+
+/* ---------- Náhled záznamů v SQL (chráněný heslem) ---------- */
+const SQL_NAHLED_HASH = "7e5d76c303045f6be076d6aa2cd1b371b1a907a656820b1e763f889e86ef6f25"; // SHA-256 hesla náhledu
+
+function openSqlModal() {
+  $("sqlAuth").hidden = false;
+  $("sqlResults").hidden = true;
+  $("sqlPassInput").value = "";
+  $("sqlStatus").textContent = "";
+  $("sqlStatus").className = "status";
+  $("sqlModal").classList.add("open");
+  $("sqlPassInput").focus();
+}
+function closeSqlModal() { $("sqlModal").classList.remove("open"); }
+
+async function showSqlRecords() {
+  const heslo = $("sqlPassInput").value.trim();
+  const st = $("sqlStatus");
+  if (sha256Hex(heslo) !== SQL_NAHLED_HASH) {
+    st.className = "status err";
+    st.textContent = "Nesprávné heslo.";
+    return;
+  }
+  st.className = "status";
+  st.innerHTML = '<span class="spinner"></span>Načítám záznamy z databáze…';
+  $("btnSqlShow").disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append("klic", LOG_KLIC);
+    fd.append("akce", "nahled");
+    fd.append("heslo", heslo);
+    const resp = await fetch(LOG_WEBHOOK, { method: "POST", body: fd });
+    if (!resp.ok) throw new Error("Make vrátil chybu " + resp.status + " — zkontrolujte, že scénář ScanDokumentu_LogSQL je zapnutý.");
+    const rows = await resp.json();
+    renderSqlRecords(Array.isArray(rows) ? rows : []);
+    $("sqlAuth").hidden = true;
+    $("sqlResults").hidden = false;
+  } catch (e) {
+    st.className = "status err";
+    st.textContent = e instanceof TypeError
+      ? "Nepodařilo se připojit k databázi — zkontrolujte připojení k internetu."
+      : e.message;
+  } finally {
+    $("btnSqlShow").disabled = false;
+  }
+}
+
+function renderSqlRecords(rows) {
+  $("sqlResStatus").className = "status ok";
+  $("sqlResStatus").textContent = rows.length
+    ? `Načteno ${rows.length} záznamů z tabulky CLB_SCANN_DOKUMENTU (od nejnovějšího).`
+    : "Tabulka CLB_SCANN_DOKUMENTU zatím neobsahuje žádné záznamy.";
+  const box = $("sqlList");
+  box.innerHTML = "";
+  rows.forEach(r => {
+    const det = document.createElement("details");
+    det.className = "hist-item";
+    const sum = document.createElement("summary");
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = "#" + r.Id + " · " + (r.Datum || "");
+    const what = document.createElement("strong");
+    what.textContent = r.Soubory || "(bez souboru)";
+    const meta = document.createElement("span");
+    meta.className = "when";
+    meta.textContent = [r.Rezim, r.Model].filter(Boolean).join(" · ");
+    sum.append(when, what, meta);
+    det.appendChild(sum);
+    const body = document.createElement("div");
+    body.className = "hist-body";
+    body.textContent = "PROMPT:\n" + (r.Prompt || "") + "\n\nODPOVĚĎ:\n" + (r.Odpoved || "");
+    det.appendChild(body);
+    box.appendChild(det);
+  });
+}
+
+$("btnSqlPreview").onclick = openSqlModal;
+$("btnSqlCancel").onclick = closeSqlModal;
+$("btnSqlClose").onclick = closeSqlModal;
+$("btnSqlShow").onclick = showSqlRecords;
+$("sqlPassInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); showSqlRecords(); } });
 
 /* ---------- Ukládání dotazů a odpovědí do SQL (CLB1.dbo.CLB_SCANN_DOKUMENTU) ---------- */
 function logToSql(prompt, odpoved, rezim, model) {

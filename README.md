@@ -41,3 +41,8 @@ tabulky **`dbo.CLB_SCANN_DOKUMENTU`** (sloupce: `Id`, `Datum`, `Soubory`, `Promp
 `Odpoved`, `Rezim`, `Model`). Scénář vkládá záznamy s escapováním apostrofů a je chráněn
 kontrolním klíčem; pokud tabulka neexistuje, při prvním zápisu si ji sám založí.
 Selhání logování nijak neblokuje práci s aplikací.
+
+V sekci **Historie** je tlačítko **🗄️ Náhled** — po zadání hesla (v kódu je uložen
+jen jeho SHA-256 otisk, konstanta `SQL_NAHLED_HASH`) načte a zobrazí všechny záznamy
+z tabulky `CLB_SCANN_DOKUMENTU`. Čtení obsluhuje stejný scénář **ScanDokumentu_LogSQL**
+(větev `akce=nahled`), který heslo kontroluje i na straně Make.
