@@ -33,16 +33,46 @@ takže se token příště nezadává. Odhlásit se lze v Nastavení tlačítkem
 Změna interního tokenu = vygenerovat nový token, spočítat jeho SHA-256
 (vstup se před hashováním převádí na velká písmena) a nahradit hodnotu `AUTH_HASH`.
 
-## Ukládání dotazů do SQL
+## Ukládání dotazů do SQL (od verze 2.0 bez Make)
 
-Každý úspěšný běh (prompt + odpověď) se odešle na Make webhook scénáře
-**ScanDokumentu_LogSQL**, který jej zapíše do SQL databáze **CLB1**,
-tabulky **`dbo.CLB_SCANN_DOKUMENTU`** (sloupce: `Id`, `Datum`, `Soubory`, `Prompt`,
-`Odpoved`, `Rezim`, `Model`). Scénář vkládá záznamy s escapováním apostrofů a je chráněn
-kontrolním klíčem; pokud tabulka neexistuje, při prvním zápisu si ji sám založí.
-Selhání logování nijak neblokuje práci s aplikací.
+Každý úspěšný běh (prompt + odpověď) se ukládá do MS SQL **CLB1**, tabulky
+**`dbo.CLB_SCANN_DOKUMENTU`** (sloupce `Id`, `Datum`, `Soubory`, `Prompt`, `Odpoved`,
+`Rezim`, `Model`). Dřív to obstarával scénář Make **ScanDokumentu_LogSQL** (ID 9727444),
+který skládal `INSERT` jako text a proti SQL injection spoléhal jen na zdvojení apostrofů.
+Nově zápis obsluhuje **vlastní Node server na VPS** a hodnoty jdou jako parametry `@nazev`.
+Selhání logování ani teď neblokuje práci s aplikací.
 
-V sekci **Historie** je tlačítko **🗄️ Náhled** — po zadání hesla (v kódu je uložen
-jen jeho SHA-256 otisk, konstanta `SQL_NAHLED_HASH`) načte a zobrazí všechny záznamy
-z tabulky `CLB_SCANN_DOKUMENTU`. Čtení obsluhuje stejný scénář **ScanDokumentu_LogSQL**
-(větev `akce=nahled`), který heslo kontroluje i na straně Make.
+| Funkce | Cesta na serveru | Dříve (Make) |
+|---|---|---|
+| zápis dotazu a odpovědi | `POST /api/log` | webhook `73h5ub8h…` |
+| náhled uložených záznamů | `POST /api/zaznamy` | tentýž webhook, větev `akce=nahled` |
+| verze serveru | `GET /api/health` | — |
+| diagnostika | `GET /api/diag` | — |
+
+V sekci **Historie** je tlačítko **🗄️ Náhled**, které po zadání hesla načte uložené záznamy.
+Heslo už není v kódu stránky ani ve scénáři, ale v `SCANLOG_HESLO`
+v `/opt/datec-scandookumentu/.env` na serveru. Bez něj náhled vůbec nejde spustit.
+Dřívější kontrolní klíč `SCANLOG-P6MZZP59` byl zrušen, nikdy nebyl tajný, byl vidět ve zdroji
+stránky. Zápis do logu proto zůstává bez hesla, stejně jako dosud.
+
+Tabulka v CLB1 už existuje; její definice je pro jistotu v `sql/00_tabulka.sql`, ale server
+ji na rozdíl od scénáře Make před každým zápisem nezakládá.
+
+**Vytěžování dokumentu AI zůstává na Make** (scénář `ScanDokumentu_Vytezeni`), případně jde
+přímo na Claude API. S SQL Serverem nemá nic společného.
+
+## Server na VPS
+
+Běží v `/opt/datec-scandookumentu` (pm2, port 3101, Caddy `scandok.95-216-201-2.sslip.io`).
+Netlify servíruje stránku a přeposílá `/api/*` na VPS podle `netlify.toml`, protože firewall
+SQL Serveru pouští jen pevnou IP adresu VPS. Funkce `fetch-url` na Netlify zůstává beze změny.
+
+Poprvé: na VPS vytvořit `/opt/datec-scandookumentu/.env` podle `.env.example` a přidat blok
+z `deploy/Caddyfile.snippet` do `/etc/caddy/Caddyfile`. Potom z Macu ve složce projektu:
+
+```
+./deploy/vps-deploy.sh
+```
+
+Testy bez databáze: `npm test`. Lokální server nad mockem: `node test/dev-server.mjs` (port 8793).
+
