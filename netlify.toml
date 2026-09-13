@@ -2,3 +2,11 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# Log dotazů a odpovědí jde do CLB1 přes vlastní server na VPS (firewall SQL Serveru
+# pouští jen pevnou IP adresu VPS). Netlify funkce fetch-url zůstává beze změny.
+[[redirects]]
+  from = "/api/*"
+  to = "https://scandok.95-216-201-2.sslip.io/api/:splat"
+  status = 200
+  force = true

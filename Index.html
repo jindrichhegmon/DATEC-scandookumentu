@@ -375,8 +375,14 @@ const store = (() => {
 })();
 
 const DEFAULT_WEBHOOK = "https://hook.eu2.make.com/zedo2wydnawxx5a2dhyuyoxfypuuuhwx";
-const LOG_WEBHOOK = "https://hook.eu2.make.com/73h5ub8hapxjr3gb4xpgiltg7he7udqv"; // Make: ScanDokumentu_LogSQL → CLB1.dbo.CLB_SCANN_DOKUMENTU
-const LOG_KLIC = "SCANLOG-P6MZZP59";
+/* Log dotazů a odpovědí jde od 13. 9. 2026 přímo do CLB1 (dbo.CLB_SCANN_DOKUMENTU) přes vlastní
+   server na VPS, bez Make. Netlify přeposílá /api/* podle netlify.toml; při otevření odjinud
+   (soubor z disku) se volá server přímo. */
+const API_SERVER = "https://scandok.95-216-201-2.sslip.io";
+const SAME_ORIGIN = location.protocol !== "file:" && /(^|\.)(sslip\.io|netlify\.app)$|^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const API_BASE = SAME_ORIGIN ? "" : API_SERVER;
+const LOG_URL = API_BASE + "/api/log";
+const ZAZNAMY_URL = API_BASE + "/api/zaznamy";
 const AUTH_HASH = "255a7850f80df0e74ca812369b47709acc7d328429c638f38a4716f46832092c"; // SHA-256 interního tokenu DATEC-SCAN
 const LS_MODE = "scandok_mode";
 const LS_WEBHOOK = "scandok_webhook";
@@ -510,14 +516,13 @@ async function showSqlRecords() {
   st.innerHTML = '<span class="spinner"></span>Načítám záznamy z databáze…';
   $("btnSqlShow").disabled = true;
   try {
-    const fd = new FormData();
-    fd.append("klic", LOG_KLIC);
-    fd.append("akce", "nahled");
-    fd.append("heslo", heslo);
-    const resp = await fetch(LOG_WEBHOOK, { method: "POST", body: fd });
-    if (!resp.ok) throw new Error("Make vrátil chybu " + resp.status + " — zkontrolujte, že scénář ScanDokumentu_LogSQL je zapnutý.");
-    const rows = await resp.json();
-    renderSqlRecords(Array.isArray(rows) ? rows : []);
+    const resp = await fetch(ZAZNAMY_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+      body: JSON.stringify({ heslo: heslo })
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data || data.ok === false) throw new Error((data && data.error) || ("Server vrátil chybu " + resp.status + "."));
+    renderSqlRecords(Array.isArray(data.radky) ? data.radky : []);
     $("sqlAuth").hidden = true;
     $("sqlResults").hidden = false;
   } catch (e) {
@@ -568,15 +573,14 @@ $("sqlPassInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.
 /* ---------- Ukládání dotazů a odpovědí do SQL (CLB1.dbo.CLB_SCANN_DOKUMENTU) ---------- */
 function logToSql(prompt, odpoved, rezim, model) {
   try {
-    const fd = new FormData();
-    fd.append("klic", LOG_KLIC);
-    fd.append("soubory", files.map(f => f.name).join(", ").slice(0, 1000));
-    fd.append("prompt", prompt);
-    fd.append("odpoved", odpoved);
-    fd.append("rezim", rezim);
-    fd.append("model", model);
     // fire-and-forget — případná chyba logování nesmí rozbít práci s aplikací
-    fetch(LOG_WEBHOOK, { method: "POST", body: fd }).catch(() => {});
+    fetch(LOG_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soubory: files.map(f => f.name).join(", ").slice(0, 1000),
+        prompt: prompt, odpoved: odpoved, rezim: rezim, model: model
+      })
+    }).catch(() => {});
   } catch {}
 }
 
@@ -1251,6 +1255,27 @@ if (isUnlocked()) {
   $("gateModal").classList.add("open");
   $("gateInput").focus();
 }
+</script>
+<script>
+/* Verze: porovná verzi stránky s verzí serveru (/api/health) a upozorní, když se liší. */
+(function () {
+  var WEB_VERZE = "2.0.0", WEB_DATUM = "13. 9. 2026";
+  var f = document.querySelector('footer.jhn-copyright');
+  if (!f) { f = document.createElement('footer'); f.className = 'jhn-copyright'; f.style.cssText = 'margin-top:2rem;padding:1rem 0;text-align:center;font-size:.75rem;opacity:.55'; document.body.appendChild(f); }
+  var el = document.createElement('div');
+  el.id = 'verze-info';
+  el.style.cssText = 'margin-top:4px;font-family:ui-monospace,Menlo,monospace;font-size:.7rem;opacity:.9';
+  el.textContent = 'web v' + WEB_VERZE + ' (' + WEB_DATUM + ') \u00b7 server: zji\u0161\u0165uji\u2026';
+  f.appendChild(el);
+  var base = (typeof API_BASE !== 'undefined') ? API_BASE : '';
+  fetch(base + '/api/health', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (h) {
+    var sv = h && h.verze ? 'v' + h.verze : '?';
+    var det = h ? [h.commit ? 'commit ' + h.commit : '', h.nasazeno ? 'nasazeno ' + new Date(h.nasazeno).toLocaleString('cs-CZ') : ''].filter(Boolean).join(', ') : '';
+    var shoda = h && h.verze === WEB_VERZE;
+    el.textContent = 'web v' + WEB_VERZE + ' (' + WEB_DATUM + ') \u00b7 server ' + sv + (det ? ' (' + det + ')' : '') + (shoda ? ' \u2713' : ' \u26a0 verze webu a serveru se li\u0161\u00ed');
+    if (!shoda) el.style.color = '#d97706';
+  }).catch(function (e) { el.textContent = 'web v' + WEB_VERZE + ' (' + WEB_DATUM + ') \u00b7 server nedostupn\u00fd (' + (e && e.message ? e.message : e) + ')'; el.style.color = '#dc2626'; });
+})();
 </script>
 </body>
 </html>

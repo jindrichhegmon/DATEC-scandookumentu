@@ -1,0 +1,13 @@
+{
+  "name": "datec-scandookumentu",
+  "version": "2.0.0",
+  "private": true,
+  "description": "AI rozbor dokumentů a webů – log dotazů a odpovědí přímo do CLB1 (SQL Server) přes vlastní Node server na VPS, bez Make",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "mssql": "^11.0.1"
+  }
+}
